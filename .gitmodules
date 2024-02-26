@@ -1,0 +1,9 @@
+[submodule "requests"]
+	path = https/github.com/psf/requests
+	url = https://github.com/psf/requests
+[submodule "boto3"]
+	path = https/github.com/boto/boto3
+	url = https://github.com/boto/boto3
+[submodule "urllib3"]
+	path = https/github.com/urllib3/urllib3
+	url = https://github.com/urllib3/urllib3

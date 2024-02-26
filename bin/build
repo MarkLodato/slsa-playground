@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""SLSA Playground mock builder
+
+Simulates a SLSA-compliant CI/CD build by doing the following:
+-   `cd <source_dir>`
+-   `python3 setup.py sdist`, which is expected to generate `dist/*.tar.gz`
+-   read `dist/*.tar.gz`, generate SLSA provenance, and write it to
+    `dist/*.tar.gz.intoto.jsonl`, using mock signatures
+
+Example usage:
+
+    bin/build https/github.com/psf/requests
+"""
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+import pathlib
+import subprocess
+import sys
+
+from typing import List
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=__doc__.partition("\n\n")[2],
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument(
+        "source_dir",
+        help="Path to the source directory; must start with `https/`",
+    )
+    g = parser.add_mutually_exclusive_group()
+    g.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Delete existing output files",
+    )
+    g.add_argument(
+        "--use-existing",
+        action="store_true",
+        help="Use existing output files (for debugging only)",
+    )
+    g.add_argument(
+        "-b",
+        "--builder",
+        default="MyBuilder",
+        help="Sets the Builder's identity, used for signing",
+    )
+    args = parser.parse_args()
+    build(pathlib.Path(args.source_dir), args.force, args.use_existing, args.builder)
+
+
+def build(
+    source_dir: pathlib.Path, force: bool, use_existing: bool, builder: str
+) -> None:
+    if not str(source_dir).startswith("https/"):
+        raise Exception(f"source directory must start with https/; got '{source_dir}'")
+    if not source_dir.exists():
+        raise Exception(f"source directory does not exist: {source_dir}")
+
+    print(60 * "-")
+    print("Building", source_dir)
+    print(60 * "-")
+    if not source_dir.exists():
+        raise Exception(f"{source_dir} does not exist")
+    output_dir = source_dir / "dist"
+    GLOB_PATTERN = "*.tar.gz"
+    existing_files = sorted(output_dir.glob(GLOB_PATTERN))
+    if existing_files:
+        if force:
+            print("Deleting existing files due to -f flag")
+            for path in existing_files:
+                print("deleting", path)
+                path.unlink()
+            existing_files = []
+        elif not use_existing:
+            raise Exception(
+                f"{output_dir} is not empty; please clean it before running or run with -f"
+            )
+    if existing_files:
+        print("Using existing files due to --use-existing flag")
+        output_files = existing_files
+    else:
+        subprocess.run(["python3", "setup.py", "sdist"], cwd=source_dir)
+        output_files = sorted(output_dir.glob(GLOB_PATTERN))
+        if not output_files:
+            raise Exception(f"no output files: {output_dir} is empty")
+
+    print()
+    print(60 * "-")
+    print("Generating provenance for:", " ".join(str(x) for x in output_files))
+    print(60 * "-")
+    statement = {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [
+            {
+                "name": path.name,
+                "digest": {
+                    "sha256": sha256(path),
+                },
+            }
+            for path in output_files
+        ],
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "predicate": {
+            "buildDefinition": {
+                "buildType": "https://example.com/PythonBuild",
+                "externalParameters": {},
+            },
+            "runDetails": {
+                "builder": {
+                    "id": f"https://example.com/{builder}",
+                },
+            },
+        },
+    }
+    payload_type = "application/vnd.in-toto+json"
+    payload = json.dumps(statement).encode("utf-8")
+    envelope = {
+        "payload": b64enc(payload),
+        "payloadType": payload_type,
+        "signatures": [
+            {
+                "keyid": builder,
+                "sig": b64enc(raw_sign(PAE(payload_type, payload), builder)),
+            }
+        ],
+    }
+    print("Statement:")
+    print(json.dumps(statement, indent=2))
+    print("Envelope:")
+    print(json.dumps(envelope, indent=2))
+    for path in output_files:
+        json_filename = path.parent / (path.name + ".intoto.jsonl")
+        print("Writing", json_filename)
+        with open(json_filename, "w") as f:
+            json.dump(envelope, f)
+            f.write("\n")
+
+
+def sha256(path: pathlib.Path) -> str:
+    hasher = hashlib.sha256()
+    buffer = bytearray(128 * 1024)
+    view = memoryview(buffer)
+    with open(path, "rb", buffering=0) as f:
+        for n in iter(lambda: f.readinto(view), 0):
+            hasher.update(view[:n])
+    return hasher.hexdigest()
+
+
+def raw_sign(message: bytes, builder: str) -> bytes:
+    """Creates a dummy signature using builder identity. Not secure!!!"""
+    hasher = hashlib.sha256()
+    hasher.update(b"Fake signature\n")
+    hasher.update(builder.encode("utf-8"))
+    hasher.update(b"\n")
+    hasher.update(message)
+    return hasher.digest()
+
+
+def b64enc(m: bytes) -> str:
+    return base64.standard_b64encode(m).decode("utf-8")
+
+
+def PAE(payloadType: str, payload: bytes) -> bytes:
+    return b"DSSEv1 %d %b %d %b" % (
+        len(payloadType),
+        payloadType.encode("utf-8"),
+        len(payload),
+        payload,
+    )
+
+
+if __name__ == "__main__":
+    main()
