@@ -37,11 +37,17 @@ This:
     the branch/tag `v2.31.0`
     -   for efficiency, this is stored in `cache/github.com/psf/requests`, but
         you should pretend is completely ephemeral
--   runs `python3 setup.py dist` (which again is expected to produce output at
-    `dist/*.tar.gz`)
--   generates SLSA provenance at `dist/*.tar.gz.intoto.jsonl`, using fake
+-   runs `python3 setup.py dist`
+-   copies the output `dist/*.tar.gz` to `built/*.tar.gz`
+-   generates SLSA provenance at `built/*.tar.gz.intoto.jsonl`, using fake
     cryptography
--   writes the output `.tar.gz` and `.intoto.jsonl` to `built/`
+
+The resulting artifact and its provenance are then found in `built/`:
+
+```
+$ ls built
+requests-2.31.0.tar.gz  requests-2.31.0.tar.gz.intoto.jsonl
+```
 
 ### Step 3: publish
 
