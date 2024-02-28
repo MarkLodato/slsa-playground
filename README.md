@@ -62,13 +62,13 @@ This:
     -   verifies that the provenance is valid
     -   verifies that the provenance contains the `tar.gz` sha256
     -   verifies that the provenance conforms to the policy
--   copies the artifact and provenance to `out/`, which is a valid PyPI
+-   copies the artifact and provenance to `published/`, which is a valid PyPI
     index
 
 The result is a valid PyPI index:
 
 ```
-python3 -m http.server -d out
+python3 -m http.server -d published
 ```
 
 To browse the index, go to http://localhost:8000 or use `pip -i

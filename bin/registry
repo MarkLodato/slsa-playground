@@ -43,8 +43,8 @@ def main():
     )
     parser.add_argument(
         "--publication_dir",
-        help="Directory to publish the pypi index to; set to empty string to disable (default: out)",
-        default=pathlib.Path("out"),
+        help="Directory to publish the pypi index to; set to empty string to disable (default: published/)",
+        default=pathlib.Path("published"),
     )
     args = parser.parse_args()
 
