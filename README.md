@@ -15,9 +15,12 @@ venv/bin/pip install -r requirements.txt
 
 ### Step 1: source
 
-First, find a git repository that can be built using `python3 setup.py sdist`.
+First, find a git repository that can be built using `python3 -m build --sdist`.
 It is expected that this command produces a single file named `dist/*.tar.gz`.
-Examples:
+For simplicity we only support sdist, i.e. `tar.gz`; extending to wheels should
+be trivial if desired.
+
+Example source repositories of popular Python packages:
 
 -   https://github.com/psf/requests (tag: v2.31.0)
 -   https://github.com/boto/boto3 (tag: 1.34.49)
@@ -92,8 +95,6 @@ http://localhost:8000`.
 
 ## TODO
 
--   Use `python3 -m build --sdist` rather than `python3 setup.py sdist`;
-    requires venv with dependencies.
 -   Use gVisor to sandbox the build.
 -   Simulate a deployment environment to show the difference between "software"
     and "service" policies.

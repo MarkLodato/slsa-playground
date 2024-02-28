@@ -4,7 +4,8 @@
 Simulates a SLSA-compliant CI/CD build for `git+https://<url>@<version>`:
 -   git clone `https://<url>` to directory `<cache-dir>/<url>` and checkout
     branch/tag `<version>`
--   run `python3 setup.py sdist`, which is expected to generate `dist/*.tar.gz`
+-   run `venv/bin/pyproject-build --sdist`, which is expected to generate
+    `dist/*.tar.gz`
 -   generate fake SLSA provenance for `dist/*.tar.gz`, written to same directory
 
 Example usage:
@@ -156,7 +157,7 @@ def build(
         print("Using existing files due to --use-existing flag")
         temp_output_files = existing_files
     else:
-        subprocess.run(["python3", "setup.py", "sdist"], cwd=source_dir)
+        subprocess.run(["venv/bin/pyproject-build", "--sdist", source_dir])
         temp_output_files = sorted(temp_build_dir.glob(GLOB_PATTERN))
         if not temp_output_files:
             raise Exception(f"no output files: {temp_build_dir} is empty")
