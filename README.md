@@ -26,9 +26,14 @@ To simulate a build:
 -   Publish the package using `bin/publish https/<path>/*.tar.gz`.
     **TODO**
 
+    -   Policy for PyPI package named `<package_name>` lives at
+        `policy/pypi/<package_name>.policy.json`.
+
 ## TODO
 
-- [ ] Generate provenance
-- [ ] Sign provenance, using keys checked into directory
 - [ ] Package by simulating upload
+- [ ] Sign provenance using keys checked into directory; requires venv with
+  dependencies
+- [ ] Use `python3 -m build --sdist` rather than `python3 setup.py sdist`;
+  requires venv with dependencies
 - [ ] Use gVisor to sandbox the build.

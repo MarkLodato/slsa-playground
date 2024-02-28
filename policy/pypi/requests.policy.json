@@ -1,0 +1,6 @@
+{
+  "expected": {
+    "builder": "https://example.com/MyBuilder",
+    "sourceRepo": "https://github.com/psf/requests"
+  }
+}

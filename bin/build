@@ -32,6 +32,7 @@ def main():
     parser.add_argument(
         "source_dir",
         help="Path to the source directory; must start with `https/`",
+        type=pathlib.Path,
     )
     g = parser.add_mutually_exclusive_group()
     g.add_argument(
@@ -52,7 +53,7 @@ def main():
         help="Sets the Builder's identity, used for signing",
     )
     args = parser.parse_args()
-    build(pathlib.Path(args.source_dir), args.force, args.use_existing, args.builder)
+    build(args.source_dir, args.force, args.use_existing, args.builder)
 
 
 def build(
@@ -101,7 +102,7 @@ def build(
             {
                 "name": path.name,
                 "digest": {
-                    "sha256": sha256(path),
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                 },
             }
             for path in output_files
@@ -110,7 +111,9 @@ def build(
         "predicate": {
             "buildDefinition": {
                 "buildType": "https://example.com/PythonBuild",
-                "externalParameters": {},
+                "externalParameters": {
+                    "sourceRepo": str(source_dir).replace("https/", "https://"),
+                },
             },
             "runDetails": {
                 "builder": {
@@ -143,21 +146,11 @@ def build(
             f.write("\n")
 
 
-def sha256(path: pathlib.Path) -> str:
-    hasher = hashlib.sha256()
-    buffer = bytearray(128 * 1024)
-    view = memoryview(buffer)
-    with open(path, "rb", buffering=0) as f:
-        for n in iter(lambda: f.readinto(view), 0):
-            hasher.update(view[:n])
-    return hasher.hexdigest()
-
-
-def raw_sign(message: bytes, builder: str) -> bytes:
-    """Creates a dummy signature using builder identity. Not secure!!!"""
+def raw_sign(message: bytes, keyid: str) -> bytes:
+    """Creates a dummy signature using keyid identity. Not secure!!!"""
     hasher = hashlib.sha256()
     hasher.update(b"Fake signature\n")
-    hasher.update(builder.encode("utf-8"))
+    hasher.update(keyid.encode("utf-8"))
     hasher.update(b"\n")
     hasher.update(message)
     return hasher.digest()
