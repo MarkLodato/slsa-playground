@@ -24,6 +24,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 
@@ -40,14 +41,13 @@ def main():
         help="URL to build of the form `git+<https-url>@<version>",
         type=GitUrl,
     )
-    g = parser.add_mutually_exclusive_group()
-    g.add_argument(
+    parser.add_argument(
         "-f",
         "--force",
         action="store_true",
         help="Delete existing output files",
     )
-    g.add_argument(
+    parser.add_argument(
         "--use-existing",
         action="store_true",
         help="Use existing output files (for debugging only)",
@@ -56,7 +56,14 @@ def main():
         "--cache-dir",
         help="Cache directory for storing the git clone (default: ./cache/)",
         type=pathlib.Path,
-        default="cache"
+        default="cache",
+    )
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        help="Output directory for writing the final output artifacts(default: ./built/)",
+        type=pathlib.Path,
+        default="built",
     )
     parser.add_argument(
         "-b",
@@ -66,7 +73,14 @@ def main():
     )
     args = parser.parse_args()
     source_dir = fetch(args.url, args.cache_dir)
-    build(source_dir, args.url, args.force, args.use_existing, args.builder)
+    build(
+        source_dir,
+        args.output_dir,
+        args.url,
+        args.force,
+        args.use_existing,
+        args.builder,
+    )
 
 
 class GitUrl:
@@ -114,6 +128,7 @@ def fetch(url: GitUrl, cache_dir: pathlib.Path) -> str:
 
 def build(
     source_dir: pathlib.Path,
+    output_dir: pathlib.Path,
     url: GitUrl,
     force: bool,
     use_existing: bool,
@@ -123,32 +138,41 @@ def build(
     print(60 * "-")
     print("Building", url.https_url, "@", url.version, "from", source_dir)
     print(60 * "-")
-    output_dir = source_dir / "dist"
+    temp_build_dir = source_dir / "dist"
     GLOB_PATTERN = "*.tar.gz"
-    existing_files = sorted(output_dir.glob(GLOB_PATTERN))
-    if existing_files:
+    existing_files = sorted(temp_build_dir.glob(GLOB_PATTERN))
+    if existing_files and not use_existing:
         if force:
             print("Deleting existing files due to -f flag")
             for path in existing_files:
                 print("deleting", path)
                 path.unlink()
             existing_files = []
-        elif not use_existing:
+        else:
             raise Exception(
-                f"{output_dir} is not empty; please clean it before running or run with -f"
+                f"{temp_build_dir} is not empty; please clean it before running or run with -f"
             )
     if existing_files:
         print("Using existing files due to --use-existing flag")
-        output_files = existing_files
+        temp_output_files = existing_files
     else:
         subprocess.run(["python3", "setup.py", "sdist"], cwd=source_dir)
-        output_files = sorted(output_dir.glob(GLOB_PATTERN))
-        if not output_files:
-            raise Exception(f"no output files: {output_dir} is empty")
+        temp_output_files = sorted(temp_build_dir.glob(GLOB_PATTERN))
+        if not temp_output_files:
+            raise Exception(f"no output files: {temp_build_dir} is empty")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_files = []
+    for file in temp_output_files:
+        o = output_dir / file.name
+        if o.exists() and not force:
+            raise Exception(f"{o} exists; run with -f to overwrite")
+        shutil.copy(file, o)
+        print("Writing", o)
+        output_files.append(o)
 
     print()
     print(60 * "-")
-    print("Generating provenance for:", " ".join(str(x) for x in output_files))
+    print("Generating provenance for:", " ".join(x.name for x in output_files))
     print(60 * "-")
     statement = {
         "_type": "https://in-toto.io/Statement/v1",

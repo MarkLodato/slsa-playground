@@ -41,6 +41,7 @@ This:
     `dist/*.tar.gz`)
 -   generates SLSA provenance at `dist/*.tar.gz.intoto.jsonl`, using fake
     cryptography
+-   writes the output `.tar.gz` and `.intoto.jsonl` to `built/`
 
 ### Step 3: publish
 
@@ -50,22 +51,22 @@ is actually an RPC interface. This server checks a SLSA policy before allowing
 the publication.
 
 ```
-bin/registry cache/github.com/psf/requests/dist/requests-2.31.0.tar.gz{,.intoto.jsonl}
+bin/registry built/requests-2.31.0.tar.gz{,.intoto.jsonl}
 ```
 
 This:
 
 -   loads the `tar.gz`
--   loads the policy for `<name>` from `policies.cfg`
+-   loads the policy for `requests` from `policies.cfg`
 -   if a policy is found:
-    -   loads the provenance
+    -   loads the provenance `.intoto.jsonl`
     -   verifies that the provenance is valid
-    -   verifies that the provenance contains the `tar.gz` sha256
+    -   verifies that the provenance contains the sha256 of the `tar.gz`
     -   verifies that the provenance conforms to the policy
--   copies the artifact and provenance to `published/`, which is a valid PyPI
-    index
+-   copies the artifact and provenance to `published/pool/`
+-   builds a valid PyPI index from `published/pool/`
 
-The result is a valid PyPI index:
+You can now serve the index via any HTTP server, e.g.:
 
 ```
 python3 -m http.server -d published
