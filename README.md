@@ -4,50 +4,75 @@ This repository contains a playground for simulating how SLSA can be integrated
 into a package registry. It simulates the Python/PyPI ecosystem, but the ideas
 translate to any package ecosystem.
 
-## Setup
+## One-time setup
 
 ```bash
-git submodule update
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 ```
 
-## Components
+## How to simulate a build and publish
 
-Source repository:
+### Step 1: source
 
--   Lives at `https/<path>/`, corresponding to URI `https://<path>/`.
--   Expected to be built using the command `python3 setup.py sdist` from within
-    that directory. This must produce a single file named `dist/*.tar.gz`.
+First, find a git repository that can be built using `python3 setup.py sdist`.
+It is expected that this command produces a single file named `dist/*.tar.gz`.
+Examples:
 
-Build platform (CI/CD):
+-   https://github.com/psf/requests (tag: v2.31.0)
+-   https://github.com/boto/boto3 (tag: 1.34.49)
 
--   Implemented in `bin/builder`.
--   To simulate a CI/CD build, use `bin/builder https/<path>`. This:
-    -   fetches `https://<path>` (using the local copy),
-    -   builds (using `python3 setup.py dist`, which again is expected to
-        produce output at `dist/*.tar.gz`), and
-    -   generates SLSA provenance (at `dist/*.tar.gz.intoto.jsonl`).
+### Step 2: build
 
-Package registry:
+Next, simulate a build on a SLSA-compliant build platform using `bin/builder`.
+Example:
 
--   Implemented in `bin/registry`.
--   This is a SLSA-aware registry that verifies a SLSA policy before
-    publication.
--   To simulate a package publication event, use
-    `bin/registry https/<path>/dist/<name>-<version>.tar.gz [<...>.intoto.jsonl]`. This:
-    -   loads the `tar.gz`
-    -   loads the policy for `<name>` from `policies.cfg`,
-    -   if a policy is found:
-        -   loads the provenance
-        -   verifies that the provenance is valid
-        -   verifies that the provenance contains the `tar.gz` sha256
-        -   verifies that the provenance conforms to the policy
-    -   copies the artifact and provenance to `out/`, which is a valid PyPI
-        index
--   To serve the index, use `python3 -m http.server -d out`.
--   To use from the index, browse http://localhost:8000 or use `pip -i
-    http://localhost:8000`.
+```
+bin/builder git+https://github.com/psf/requests@v2.31.0
+```
+
+This:
+
+-   clones the git repository `https://github.com/psf/requests` and checks out
+    the branch/tag `v2.31.0`
+    -   for efficiency, this is stored in `cache/github.com/psf/requests`, but
+        you should pretend is completely ephemeral
+-   runs `python3 setup.py dist` (which again is expected to produce output at
+    `dist/*.tar.gz`)
+-   generates SLSA provenance at `dist/*.tar.gz.intoto.jsonl`, using fake
+    cryptography
+
+### Step 3: publish
+
+Finally, simulate a package publication (aka upload) to the PyPI package
+registry using `bin/registry`. Pretend that this is a server, and that the CLI
+is actually an RPC interface. This server checks a SLSA policy before allowing
+the publication.
+
+```
+bin/registry cache/github.com/psf/requests/dist/requests-2.31.0.tar.gz{,.intoto.jsonl}
+```
+
+This:
+
+-   loads the `tar.gz`
+-   loads the policy for `<name>` from `policies.cfg`
+-   if a policy is found:
+    -   loads the provenance
+    -   verifies that the provenance is valid
+    -   verifies that the provenance contains the `tar.gz` sha256
+    -   verifies that the provenance conforms to the policy
+-   copies the artifact and provenance to `out/`, which is a valid PyPI
+    index
+
+The result is a valid PyPI index:
+
+```
+python3 -m http.server -d out
+```
+
+To browse the index, go to http://localhost:8000 or use `pip -i
+http://localhost:8000`.
 
 ## Things to try
 

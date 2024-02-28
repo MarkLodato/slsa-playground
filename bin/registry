@@ -175,9 +175,14 @@ def verify_policy(
         "https://example.com/PythonBuild",
         "buildDefinition.buildType",
     )
+    # We allow any version
     check_eq(
-        provenance["buildDefinition"]["externalParameters"]["sourceRepo"],
-        policy["sourcerepo"],
+        re.sub(
+            r"@.*",
+            "@*",
+            provenance["buildDefinition"]["externalParameters"]["sourceRepo"],
+        ),
+        "git+" + policy["sourcerepo"] + "@*",
         "buildDefinition.externalParameters.sourceRepo",
     )
     print(f"Passed the policy check for package '{package_name}'")

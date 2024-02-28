@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """SLSA Playground mock builder
 
-Simulates a SLSA-compliant CI/CD build by doing the following:
--   `cd <source_dir>`
--   `python3 setup.py sdist`, which is expected to generate `dist/*.tar.gz`
--   read `dist/*.tar.gz`, generate SLSA provenance, and write it to
-    `dist/*.tar.gz.intoto.jsonl`, using mock signatures
+Simulates a SLSA-compliant CI/CD build for `git+https://<url>@<version>`:
+-   git clone `https://<url>` to directory `<cache-dir>/<url>` and checkout
+    branch/tag `<version>`
+-   run `python3 setup.py sdist`, which is expected to generate `dist/*.tar.gz`
+-   generate fake SLSA provenance for `dist/*.tar.gz`, written to same directory
 
 Example usage:
 
-    bin/builder https/github.com/psf/requests
+    bin/builder git+https://github.com/psf/requests@v2.31.0
+
+This will produce:
+
+    cache/github.com/psf/requests/dist/requests-2.31.0.tar.gz
+    cache/github.com/psf/requests/dist/requests-2.31.0.tar.gz.intoto.jsonl
 """
 
 import argparse
@@ -18,6 +23,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -30,9 +36,9 @@ def main():
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
-        "source_dir",
-        help="Path to the source directory; must start with `https/`",
-        type=pathlib.Path,
+        "url",
+        help="URL to build of the form `git+<https-url>@<version>",
+        type=GitUrl,
     )
     g = parser.add_mutually_exclusive_group()
     g.add_argument(
@@ -46,29 +52,77 @@ def main():
         action="store_true",
         help="Use existing output files (for debugging only)",
     )
-    g.add_argument(
+    parser.add_argument(
+        "--cache-dir",
+        help="Cache directory for storing the git clone (default: ./cache/)",
+        type=pathlib.Path,
+        default="cache"
+    )
+    parser.add_argument(
         "-b",
         "--builder",
         default="MyBuilder",
         help="Sets the Builder's identity, used for signing",
     )
     args = parser.parse_args()
-    build(args.source_dir, args.force, args.use_existing, args.builder)
+    source_dir = fetch(args.url, args.cache_dir)
+    build(source_dir, args.url, args.force, args.use_existing, args.builder)
+
+
+class GitUrl:
+    url_without_https: str
+    version: str
+    https_url: str
+    full: str
+
+    def __init__(self, value: str):
+        m = re.match(r"^git\+https://(.*)@(.*)$", value)
+        if not m:
+            raise Exception("URL must be of the form `git+https://...@...`")
+        self.url_without_https, self.version = m.groups()
+        self.https_url = "https://" + self.url_without_https
+        self.full = value
+
+    def __repr__(self):
+        return "GitUrl('%s')" % self.full
+
+
+def fetch(url: GitUrl, cache_dir: pathlib.Path) -> str:
+    """Clones `url` if it does not exist in the cache, or checks out `url.version` if it does.
+
+    Returns the clone directory."""
+    source_dir = cache_dir / url.url_without_https
+    print(60 * "-")
+    print("Cloning", url.https_url, "@", url.version, "to", source_dir)
+    print(60 * "-")
+    if not source_dir.exists() or not list(source_dir.iterdir()):
+        source_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                url.https_url,
+                str(source_dir),
+                "-b",
+                url.version,
+            ]
+        )
+    else:
+        subprocess.run(["git", "checkout", url.version], cwd=source_dir)
+    return source_dir
 
 
 def build(
-    source_dir: pathlib.Path, force: bool, use_existing: bool, builder: str
+    source_dir: pathlib.Path,
+    url: GitUrl,
+    force: bool,
+    use_existing: bool,
+    builder: str,
 ) -> None:
-    if not str(source_dir).startswith("https/"):
-        raise Exception(f"source directory must start with https/; got '{source_dir}'")
-    if not source_dir.exists():
-        raise Exception(f"source directory does not exist: {source_dir}")
-
+    print()
     print(60 * "-")
-    print("Building", source_dir)
+    print("Building", url.https_url, "@", url.version, "from", source_dir)
     print(60 * "-")
-    if not source_dir.exists():
-        raise Exception(f"{source_dir} does not exist")
     output_dir = source_dir / "dist"
     GLOB_PATTERN = "*.tar.gz"
     existing_files = sorted(output_dir.glob(GLOB_PATTERN))
@@ -112,7 +166,7 @@ def build(
             "buildDefinition": {
                 "buildType": "https://example.com/PythonBuild",
                 "externalParameters": {
-                    "sourceRepo": str(source_dir).replace("https/", "https://"),
+                    "sourceRepo": url.full,
                 },
             },
             "runDetails": {
