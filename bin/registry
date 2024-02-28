@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""SLSA Playground mock package registry
+
+This script simulates a package registry server. Pretend that the CLI is
+actually an RPC interface.
+"""
+
+import argparse
+import base64
+import configparser
+import hashlib
+import json
+import pathlib
+import re
+import shutil
+import subprocess
+import types
+
+from typing import Optional
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=__doc__.partition("\n\n")[2],
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument(
+        "artifact",
+        help="Path to artifact to publish; must be named *.tar.gz",
+        type=pathlib.Path,
+    )
+    parser.add_argument(
+        "attestation_bundle",
+        help="Path to attestation bundle; must be named *.intoto.jsonl",
+        type=pathlib.Path,
+        nargs="?",
+    )
+    parser.add_argument(
+        "--policy_file",
+        help="File from which to load policies (default: policies.cfg)",
+        type=pathlib.Path,
+        default=pathlib.Path("policies.cfg"),
+    )
+    parser.add_argument(
+        "--publication_dir",
+        help="Directory to publish the pypi index to; set to empty string to disable (default: out)",
+        default=pathlib.Path("out"),
+    )
+    args = parser.parse_args()
+
+    package_name = package_name_from_filename(args.artifact.name)
+    # TODO validate that the filename matches PKG-INFO
+    print("Attempting to publish package:", package_name)
+    sha256_digest = hashlib.sha256(args.artifact.read_bytes()).digest()
+    verify_policy(
+        package_name, sha256_digest, args.attestation_bundle, args.policy_file
+    )
+    if args.publication_dir:
+        publish(args.artifact, args.attestation_bundle, args.publication_dir)
+
+
+def package_name_from_filename(filename: str) -> str:
+    """Extracts the package name portion of a canonical sdist filename.
+
+    >>> package_name_from_filename("foo-bar-1.0.tar.gz")
+    'foo-bar'
+    """
+    FILENAME_RE = re.compile(r"""^(?P<name>.+)-(?P<version>[^-]+)\.tar\.gz$""")
+    m = FILENAME_RE.match(filename)
+    if not m:
+        raise Exception(f"{filename} does not match pattern '*-*.tar.gz'")
+    return m.group("name")
+
+
+def read_provenance(path: pathlib.Path, sha256_digest: bytes) -> dict:
+    """Returns the provenance predicate at `path`.
+
+    Raises an exception if the provenance fails verification or if it does not
+    contain `sha256_digest`.
+    """
+    # NOTE: In real code we might want to skip over unrecognized or irrelevant
+    # provenance rather than raising an exception. But for the demo, it is more
+    # illustrative to error out.
+    PAYLOAD_TYPE = "application/vnd.in-toto+json"
+    STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
+    PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
+    if not path:
+        return None
+    envelope = json.loads(path.read_text())
+    check_eq(envelope["payloadType"], PAYLOAD_TYPE, "payloadType")
+    payload = base64.b64decode(envelope["payload"])
+    # WARNING: this is a dummy signature that is not at all secure!
+    # Also we should accept any signatures
+    check_eq(len(envelope["signatures"]), 1, "len(signatures)")
+    keyid = envelope["signatures"][0]["keyid"]
+    sig = envelope["signatures"][0]["sig"]
+    if not raw_verify(payload, envelope["payloadType"], base64.b64decode(sig), keyid):
+        raise Exception("invalid signature")
+    print(f"✔️ signature is valid for public key identity '{keyid}'")
+    statement = json.loads(payload.decode("utf-8"))
+    check_eq(statement["_type"], STATEMENT_TYPE, "_type")
+    check_eq(statement["predicateType"], PREDICATE_TYPE, "predicateType")
+    if not any(
+        bytes.fromhex(s["digest"]["sha256"]) == sha256_digest
+        for s in statement["subject"]
+    ):
+        raise Exception(f"no subject found with digest.sha256 '{sha256_digest.hex()}'")
+    print(f"✔️ subject contains digest '{sha256_digest.hex()}'")
+    predicate = statement["predicate"]
+    # Fake:
+    check_eq(
+        predicate["runDetails"]["builder"]["id"],
+        "https://example.com/" + keyid,
+        "builder.id matches keyid",
+    )
+    return predicate
+
+
+def raw_verify(payload: bytes, payloadType: str, signature: bytes, keyid: str) -> bool:
+    """Returns true if `signature` is a signature over `message` by `keyid`.
+
+    WARNING: This is not in any way secure!
+    """
+    hasher = hashlib.sha256()
+    hasher.update(b"Fake signature\n")
+    hasher.update(keyid.encode("utf-8"))
+    hasher.update(b"\n")
+    hasher.update(PAE(payloadType, payload))
+    # print('got:     ', hasher.hexdigest())
+    # print('expected:', signature.hex())
+    return signature == hasher.digest()
+
+
+def PAE(payloadType: str, payload: bytes) -> bytes:
+    return b"DSSEv1 %d %b %d %b" % (
+        len(payloadType),
+        payloadType.encode("utf-8"),
+        len(payload),
+        payload,
+    )
+
+
+def verify_policy(
+    package_name: str,
+    sha256_digest: bytes,
+    attestation_bundle: Optional[pathlib.Path],
+    policy_file: pathlib.Path,
+) -> None:
+    """Raises exception if `provenance` doesn't match policy for `package_name`."""
+    p = configparser.ConfigParser()
+    with policy_file.open() as f:
+        p.read_file(f)
+    try:
+        policy = dict(p.items("pypi." + package_name))
+    except configparser.NoSectionError:
+        print(f"No policy for package '{package_name}'; defaulting to allow")
+        return
+    print(f"Checking policy for package '{package_name}'")
+
+    if not attestation_bundle:
+        raise Exception(
+            f"Package '{package_name}' has a policy set, but no provenance given"
+        )
+    print("Policy found; loading provenance and verifying that it matches artifact")
+    provenance = read_provenance(attestation_bundle, sha256_digest)
+
+    print("Provenance is valid; verifying that provenance matches policy")
+    check_eq(
+        provenance["runDetails"]["builder"]["id"],
+        policy["builder"],
+        "runDetails.builder.id",
+    )
+    check_eq(
+        provenance["buildDefinition"]["buildType"],
+        "https://example.com/PythonBuild",
+        "buildDefinition.buildType",
+    )
+    check_eq(
+        provenance["buildDefinition"]["externalParameters"]["sourceRepo"],
+        policy["sourcerepo"],
+        "buildDefinition.externalParameters.sourceRepo",
+    )
+    print(f"Passed the policy check for package '{package_name}'")
+
+
+def publish(
+    artifact_path: pathlib.Path,
+    attestation_bundle: Optional[pathlib.Path],
+    publication_dir: pathlib.Path,
+) -> None:
+    print("Publishing artifact", artifact_path.name)
+
+    # Write all of the artifacts to the pool directory.
+    pool_dir = publication_dir / "pool"
+    print("Copying artifact files to", pool_dir)
+    pool_dir.mkdir(parents=True, exist_ok=True)
+    # In reality PyPI doesn't allow overwriting an existing file, but for the
+    # purposes of this demo, it seems better to allow it for simplicity.
+    shutil.copy(artifact_path, pool_dir / artifact_path.name)
+    if attestation_bundle:
+        shutil.copy(
+            attestation_bundle, pool_dir / (artifact_path.name + ".intoto.jsonl")
+        )
+
+    # Update the list of artifact files, which is fed into dumb-pypi.
+    package_list = pool_dir / "packages.txt"
+    with open(package_list, "w") as f:
+        for file in pool_dir.iterdir():
+            if file.name.endswith(".tar.gz") or file.name.endswith(".whl"):
+                f.write(file.name)
+                f.write("\n")
+
+    # Run dumb-pypi to generate a valid PyPI index.
+    print("Updating the registry at", publication_dir)
+    dumb_pypi = "venv/bin/dumb-pypi"
+    if not pathlib.Path(dumb_pypi).exists():
+        raise Exception(
+            "missing dumb-pypi; please install with `python3 -m venv venv && venv/bin/pip install -r requirements.txt`"
+        )
+    subprocess.run(
+        [
+            dumb_pypi,
+            "--package-list",
+            str(package_list),
+            "--packages-url",
+            "/pool/",
+            "--output-dir",
+            str(publication_dir),
+        ]
+    )
+    print(f"Serve the index using `python3 -m http.server -d {publication_dir}`")
+
+
+def check_eq(actual, expected, field_name: str, verbose=True):
+    if actual != expected:
+        raise Exception(f"{field_name}: expected {expected!r}, got {actual!r}")
+    if verbose:
+        print(f"✔️ {field_name} == {expected!r}")
+
+
+if __name__ == "__main__":
+    main()

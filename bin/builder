@@ -9,7 +9,7 @@ Simulates a SLSA-compliant CI/CD build by doing the following:
 
 Example usage:
 
-    bin/build https/github.com/psf/requests
+    bin/builder https/github.com/psf/requests
 """
 
 import argparse
