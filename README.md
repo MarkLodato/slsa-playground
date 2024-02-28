@@ -63,3 +63,5 @@ Package registry:
 -   Use `python3 -m build --sdist` rather than `python3 setup.py sdist`;
     requires venv with dependencies.
 -   Use gVisor to sandbox the build.
+-   Simulate a deployment environment to show the difference between "software"
+    and "service" policies.
