@@ -7,7 +7,6 @@ actually an RPC interface.
 
 import argparse
 import base64
-import configparser
 import hashlib
 import json
 import pathlib
@@ -36,14 +35,14 @@ def main():
         nargs="?",
     )
     parser.add_argument(
-        "--policy_file",
-        help="File from which to load policies (default: policies.cfg)",
+        "--policy_dir",
+        help="Directories from which to load policies (default: ./policy/pypi/)",
         type=pathlib.Path,
-        default=pathlib.Path("policies.cfg"),
+        default=pathlib.Path("policy/pypi"),
     )
     parser.add_argument(
         "--publication_dir",
-        help="Directory to publish the pypi index to; set to empty string to disable (default: published/)",
+        help="Directory to publish the pypi index to; set to empty string to disable (default: ./published/)",
         default=pathlib.Path("published"),
     )
     args = parser.parse_args()
@@ -53,7 +52,7 @@ def main():
     print("Attempting to publish package:", package_name)
     sha256_digest = hashlib.sha256(args.artifact.read_bytes()).digest()
     verify_policy(
-        package_name, sha256_digest, args.attestation_bundle, args.policy_file
+        package_name, sha256_digest, args.attestation_bundle, args.policy_dir
     )
     if args.publication_dir:
         publish(args.artifact, args.attestation_bundle, args.publication_dir)
@@ -144,18 +143,17 @@ def verify_policy(
     package_name: str,
     sha256_digest: bytes,
     attestation_bundle: Optional[pathlib.Path],
-    policy_file: pathlib.Path,
+    policy_dir: pathlib.Path,
 ) -> None:
     """Raises exception if `provenance` doesn't match policy for `package_name`."""
-    p = configparser.ConfigParser()
-    with policy_file.open() as f:
-        p.read_file(f)
-    try:
-        policy = dict(p.items("pypi." + package_name))
-    except configparser.NoSectionError:
+    print(f"Checking policy for package '{package_name}'")
+    policy_path = policy_dir / (package_name + ".policy.json")
+    print("Loading policy at", policy_path)
+    if not policy_path.exists():
         print(f"No policy for package '{package_name}'; defaulting to allow")
         return
-    print(f"Checking policy for package '{package_name}'")
+    with policy_path.open() as f:
+        policy = json.load(f)["expected"]
 
     if not attestation_bundle:
         raise Exception(
@@ -182,7 +180,7 @@ def verify_policy(
             "@*",
             provenance["buildDefinition"]["externalParameters"]["sourceRepo"],
         ),
-        "git+" + policy["sourcerepo"] + "@*",
+        "git+" + policy["sourceRepo"] + "@*",
         "buildDefinition.externalParameters.sourceRepo",
     )
     print(f"Passed the policy check for package '{package_name}'")

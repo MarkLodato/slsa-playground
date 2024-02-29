@@ -66,7 +66,7 @@ bin/registry built/requests-2.31.0.tar.gz{,.intoto.jsonl}
 This:
 
 -   loads the `tar.gz`
--   loads the policy for `requests` from `policies.cfg`
+-   loads the policy at `policy/pypi/requests.policy.json`, if present
 -   if a policy is found:
     -   loads the provenance `.intoto.jsonl`
     -   verifies that the provenance is valid
