@@ -89,15 +89,93 @@ http://localhost:8000`.
 
 ## Things to try
 
-Try to get a "bad" version of `requests` to be published, meaning a `tar.gz`
+First, run through the steps above to publish a "good" version of a package. It
+should work, which you can verify by seeing that the "built" version and
+"published" version are the same. (You'll get a different hash than `ac8b6...`
+since the build is not reproducible, but the two files should agree in your
+terminal.)
+
+```bash
+$ bin/builder git+https://github.com/psf/requests@v2.31.0
+...
+Writing built/requests-2.31.0.tar.gz
+...
+Writing built/requests-2.31.0.tar.gz.intoto.jsonl
+$ bin/registry built/requests-2.31.0.tar.gz*
+...
+Passed the policy check for package 'requests'
+Publishing artifact requests-2.31.0.tar.gz
+...
+$ jq '.releases["2.31.0"][0].url' published/pypi/requests/2.31.0/json
+"/pool/requests-2.31.0.tar.gz"
+$ sha256sum {built,published/pool}/requests-2.31.0.tar.gz
+ac8b68783b2038dd99ebff21c52e97d8ce315be04ab4d445f340c727dc7711df  built/requests-2.31.0.tar.gz
+ac8b68783b2038dd99ebff21c52e97d8ce315be04ab4d445f340c727dc7711df  published/pool/requests-2.31.0.tar.gz
+```
+
+Now try to get a "bad" version of `requests` to be published, meaning a `tar.gz`
 that contains anything other than what is in the official `psf/requests`
-repository. It should not be possible. In particular:
+repository. It should not be possible. See https://slsa.dev/threats for
+inspiration. In particular:
+
+-   Built from a different source repo (i.e. provenance doesn't match policy)
+
+    See
+    https://github.com/MarkLodato/requests/commit/4f951ea3597859aaf6ca978b62afd37be5957f6f,
+    which is an unofficial commit on an unofficial fork.
+
+    ```bash
+    $ bin/builder git+https://github.com/MarkLodato/requests@v2.31.666
+    ...
+    $ tar xaf built/requests-2.31.666.tar.gz --to-command 'egrep -Hn --label="$TAR_FILENAME" tampered || true'
+    requests-2.31.666/requests/__init__.py:47:print("I'm in danger! This library has been tampered with!")
+    $ bin/registry built/requests-2.31.666.tar.gz*
+    ...
+    Exception: buildDefinition.externalParameters.sourceRepo: expected 'git+https://github.com/psf/requests@*', got 'git+https://github.com/MarkLodato/requests@*'
+    ```
 
 -   Without provenance
--   With tampered provenance
--   With tampered artifact (post-build)
--   Built from a different source repo
--   Built from a different builder
+
+    ```bash
+    $ bin/registry built/requests-2.31.666.tar.gz
+    ...
+    Exception: Package 'requests' has a policy set, but no provenance given
+    ```
+
+-   With "good" provenance that doesn't apply to the artifact in question
+
+    ```bash
+    $ bin/registry built/requests-2.31.666.tar.gz built/requests-2.31.0.tar.gz.intoto.jsonl
+    ...
+    Exception: no subject found with digest.sha256 '0924469d3c9335e672188e66e77975f591ad34de52e409e1bde626c62587f629'
+    ```
+
+    NOTE: This is equivalent to tampering with a "good" artifact by transforming
+    `requests-2.31.0.tar.gz` into `requests-2.31.666.tar.gz`.
+
+-   With tampered provenance (good predicate but invalid signature)
+
+    ```bash
+    # Create "good" looking provenance payload
+    $ PAYLOAD=$(jq -r .payload built/requests-2.31.666.tar.gz.intoto.jsonl | base64 -d | sed s/MarkLodato/psf/ | base64 -w0)
+    # Stuff it in an existing envelope.
+    $ sed 's/"payload": "[^"]\+"/"payload": "'$PAYLOAD'"/' built/requests-2.31.666.tar.gz.intoto.jsonl > built/fake.intoto.jsonl
+    $ bin/registry built/requests-2.31.666.tar.gz built/fake.intoto.jsonl
+    ...
+    Exception: invalid signature
+    ```
+
+-   Built from a different builder that allows faking the provenance or
+    otherwise tampering during the build
+
+    ```bash
+    $ bin/builder git+https://github.com/MarkLodato/requests@v2.31.666 \
+        --override-source-repo git+https://github.com/psf/requests@v2.31.666 \
+        -b BadBuilder -f
+    $ bin/registry built/requests-2.31.666.tar.gz*
+    ...
+    Exception: runDetails.builder.id: expected 'https://example.com/MyBuilder', got 'https://example.com/BadBuilder'
+    ```
 
 Other package names should work because they don't have a policy and thus don't
 have SLSA protections.
