@@ -72,12 +72,22 @@ def main():
         default="MyBuilder",
         help="Sets the Builder's identity, used for signing",
     )
+    parser.add_argument(
+        "--override-source-repo",
+        help="Override the sourceRepo in the provenance; requires `-b BadBuilder`",
+    )
     args = parser.parse_args()
     source_dir = fetch(args.url, args.cache_dir)
+    if not args.override_source_repo:
+        full_url = args.url.full
+    elif args.builder != "BadBuilder":
+        raise Exception("ERROR: --override-source-repo requires `-b BadBuilder`")
+    else:
+        full_url = args.override_source_repo
     build(
         source_dir,
         args.output_dir,
-        args.url,
+        full_url,
         args.force,
         args.use_existing,
         args.builder,
@@ -130,14 +140,14 @@ def fetch(url: GitUrl, cache_dir: pathlib.Path) -> str:
 def build(
     source_dir: pathlib.Path,
     output_dir: pathlib.Path,
-    url: GitUrl,
+    source_repo_url: str,
     force: bool,
     use_existing: bool,
     builder: str,
 ) -> None:
     print()
     print(60 * "-")
-    print("Building", url.https_url, "@", url.version, "from", source_dir)
+    print("Building", source_repo_url, "from", source_dir)
     print(60 * "-")
     temp_build_dir = source_dir / "dist"
     GLOB_PATTERN = "*.tar.gz"
@@ -191,7 +201,7 @@ def build(
             "buildDefinition": {
                 "buildType": "https://example.com/PythonBuild",
                 "externalParameters": {
-                    "sourceRepo": url.full,
+                    "sourceRepo": source_repo_url,
                 },
             },
             "runDetails": {
