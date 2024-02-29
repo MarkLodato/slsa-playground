@@ -51,9 +51,7 @@ def main():
     # TODO validate that the filename matches PKG-INFO
     print("Attempting to publish package:", package_name)
     sha256_digest = hashlib.sha256(args.artifact.read_bytes()).digest()
-    verify_policy(
-        package_name, sha256_digest, args.attestation_bundle, args.policy_dir
-    )
+    verify_policy(package_name, sha256_digest, args.attestation_bundle, args.policy_dir)
     if args.publication_dir:
         publish(args.artifact, args.attestation_bundle, args.publication_dir)
 
