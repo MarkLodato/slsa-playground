@@ -11,7 +11,7 @@ python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 ```
 
-## How to simulate a build and publish
+## How it works
 
 ### Step 1: source
 
@@ -87,7 +87,9 @@ python3 -m http.server -d published
 To browse the index, go to http://localhost:8000 or use `pip -i
 http://localhost:8000`.
 
-## Things to try
+## Things to try (walkthrough)
+
+### Good build (succeeds)
 
 First, run through the steps above to publish a "good" version of a package. It
 should work, which you can verify by seeing that the "built" version and
@@ -112,6 +114,8 @@ $ sha256sum {built,published/pool}/requests-2.31.0.tar.gz
 ac8b68783b2038dd99ebff21c52e97d8ce315be04ab4d445f340c727dc7711df  built/requests-2.31.0.tar.gz
 ac8b68783b2038dd99ebff21c52e97d8ce315be04ab4d445f340c727dc7711df  published/pool/requests-2.31.0.tar.gz
 ```
+
+### Tampering with SLSA (fails)
 
 Now try to get a "bad" version of `requests` to be published, meaning a `tar.gz`
 that contains anything other than what is in the official `psf/requests`
@@ -145,7 +149,7 @@ inspiration. In particular:
 -   With "good" provenance that doesn't apply to the artifact in question
 
     ```bash
-    $ bin/registry built/requests-2.31.666.tar.gz built/requests-2.31.0.tar.gz.intoto.jsonl
+    $ bin/regitry built/requests-2.31.666.tar.gz built/requests-2.31.0.tar.gz.intoto.jsonl
     ...
     Exception: no subject found with digest.sha256 '0924469d3c9335e672188e66e77975f591ad34de52e409e1bde626c62587f629'
     ```
@@ -177,10 +181,26 @@ inspiration. In particular:
     Exception: runDetails.builder.id: expected 'https://example.com/MyBuilder', got 'https://example.com/BadBuilder'
     ```
 
-Other package names should work because they don't have a policy and thus don't
-have SLSA protections.
+### Tampering without SLSA (succeeds)
 
-## TODO
+If you disable the SLSA policy, all of the attacks above should succeed.
+Example:
+
+```bash
+$ mv policy/pypi/requests.policy.json{,.backup}
+$ bin/registry built/requests-2.31.666.tar.gz
+...
+No policy for package 'requests'; defaulting to allow
+Publishing artifact requests-2.31.666.tar.gz
+```
+
+Remember to restore the policy when you're done!
+
+```bash
+$ mv policy/pypi/requests.policy.json{.backup,}
+```
+
+## TODO (ideas for future)
 
 -   Use gVisor to sandbox the build.
 -   Simulate a deployment environment to show the difference between "software"
