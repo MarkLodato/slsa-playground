@@ -59,6 +59,9 @@ registry using `bin/registry`. Pretend that this is a server, and that the CLI
 is actually an RPC interface. This server checks a SLSA policy before allowing
 the publication.
 
+NOTE: This doesn't simulate authentication and authorization of the uploader. In
+real life that would still happen, and the policy check is a defense in depth.
+
 ```
 bin/registry built/requests-2.31.0.tar.gz{,.intoto.jsonl}
 ```
@@ -86,12 +89,18 @@ http://localhost:8000`.
 
 ## Things to try
 
--   Publishing a "bad" version of `requests`:
-    -   Without provenance
-    -   With tampered provenance
-    -   With tampered artifact (post-build)
-    -   Built from a different source repo
-    -   Built from a different builder
+Try to get a "bad" version of `requests` to be published, meaning a `tar.gz`
+that contains anything other than what is in the official `psf/requests`
+repository. It should not be possible. In particular:
+
+-   Without provenance
+-   With tampered provenance
+-   With tampered artifact (post-build)
+-   Built from a different source repo
+-   Built from a different builder
+
+Other package names should work because they don't have a policy and thus don't
+have SLSA protections.
 
 ## TODO
 
